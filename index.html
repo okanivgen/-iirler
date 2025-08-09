@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Şairler Konuşsun — Aşk Dörtlükleri</title>
+<style>
+  :root{
+    --bg:#fffaf8;
+    --accent:#c21b3a;
+    --muted:#444;
+  }
+  html,body{height:100%;margin:0;padding:0;background:var(--bg);font-family: "Helvetica Neue", Arial, sans-serif;color:var(--muted);}
+  /* full ekran düzeni */
+  .wrap{min-height:100%;display:flex;flex-direction:column;align-items:center;gap:12px;padding:28px 16px;}
+  header{text-align:center;max-width:900px;}
+  h1{margin:8px 0;font-size:22px;color:var(--accent);}
+  .lead{font-size:18px;color:#222;max-width:960px;margin:6px auto 0;}
+  /* arka plan kalpler (küçük tekrar eden) */
+  .bg-hearts{
+    position:fixed; inset:0; pointer-events:none; z-index:0; overflow:hidden;
+  }
+  .heart {
+    position:absolute;
+    width:12px;
+    height:12px;
+    transform:rotate(-45deg);
+    background:var(--accent);
+    border-radius:2px;
+    opacity:0.9;
+    will-change:transform,opacity;
+  }
+  .heart::before,.heart::after{
+    content:""; position:absolute; width:12px; height:12px; background:var(--accent); border-radius:50%;
+  }
+  .heart::before{ top:-6px; left:0; }
+  .heart::after{ left:6px; top:0; }
+
+  /* içerik kartı */
+  .card{position:relative;z-index:2;width:100%;max-width:820px;background:linear-gradient(180deg,#fff,#fff6f6);border-radius:14px;padding:20px;box-shadow:0 10px 30px rgba(0,0,0,0.08);border:1px solid rgba(194,27,58,0.08);}
+  .poem-box{min-height:140px;border-radius:10px;padding:18px;background:#fff7f7;border:1px solid rgba(194,27,58,0.12);font-style:italic;font-size:18px;line-height:1.6;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;white-space:pre-line;color:#222;}
+  .poet{margin-top:10px;font-weight:700;color:var(--accent);}
+  .controls{display:flex;gap:12px;align-items:center;justify-content:center;margin-top:14px;}
+  button{background:var(--accent);color:#fff;border:0;padding:12px 20px;border-radius:10px;font-size:16px;cursor:pointer;box-shadow:0 8px 20px rgba(194,27,58,0.14);}
+  button:disabled{background:#ccc;color:#666;cursor:not-allowed;box-shadow:none;}
+  .meta{font-size:14px;color:#666;margin-top:8px;}
+  .note{margin-top:12px;background:#fff3bf;border:2px solid #ffcc00;padding:10px;border-radius:8px;font-weight:700;color:#222;display:inline-block;}
+  @media (max-width:520px){
+    h1{font-size:18px;}
+    .lead{font-size:15px;}
+    .poem-box{font-size:16px;padding:14px;}
+    button{padding:10px 16px;font-size:15px;}
+  }
+</style>
+</head>
+<body>
+  <div class="bg-hearts" id="bgHearts"></div>
+
+  <div class="wrap">
+    <header>
+      <h1>Seni ne kadar sevdiğimi açıklamaya benim kelimelerim yetmiyor — bırakalım şairlerimiz konuşsun</h1>
+      <div class="lead">Aşağıdaki butona bas; eski Türk şiir geleneğinin ruhunda hazırlanmış dörtlükler karşına çıkacak. Her biri bir nefes, bir an, bir sevda.</div>
+    </header>
+
+    <div class="card" role="main" aria-live="polite">
+      <div id="poemBox" class="poem-box">Butona bas ve dörtlüğü gör — her biri klasik üslupta özgün dörtlüklerdir.</div>
+      <div id="poetName" class="poet" aria-hidden="true"></div>
+
+      <div class="controls">
+        <button id="btnShow">BAS</button>
+        <div class="meta">Kalan hakkın: <span id="remaining">5</span> / 5</div>
+      </div>
+
+      <div style="text-align:center;margin-top:12px;">
+        <div class="note">Not: Şiirler klasik Türk şiiri üslubunda özgün olarak hazırlandı; gerçek tarihî alıntı değildir.</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ---------- Arka plan kalpleri oluştur (hafif ve performans dostu) ---------- */
+(function createHearts(){
+  const container = document.getElementById('bgHearts');
+  const count = Math.min(Math.max(Math.floor(window.innerWidth * window.innerHeight / 60000), 20), 80); // ekran ölçeğine göre
+  for(let i=0;i<count;i++){
+    const el = document.createElement('div');
+    el.className = 'heart';
+    const left = Math.random()*100;
+    const top = Math.random()*100;
+    const scale = 0.6 + Math.random()*1.2;
+    el.style.left = left + 'vw';
+    el.style.top = top + 'vh';
+    el.style.transform = `rotate(-45deg) scale(${scale})`;
+    el.style.opacity = 0.6 + Math.random()*0.4;
+    // anim param
+    const dur = 4000 + Math.random()*6000;
+    const delay = -Math.random()*dur;
+    el.animate([
+      { transform: `translateY(0px) rotate(-45deg) scale(${scale})`, opacity: el.style.opacity },
+      { transform: `translateY(-12px) rotate(-45deg) scale(${scale*1.05})`, opacity: 0.9 },
+      { transform: `translateY(0px) rotate(-45deg) scale(${scale})`, opacity: el.style.opacity }
+    ], { duration: dur, iterations: Infinity, delay });
+    container.appendChild(el);
+  }
+})();
+
+/* ---------- Şiir üretim mantığı ve localStorage yönetimi ----------
+   - Sayfa ilk açıldığında 'poems_klassik' anahtarında 200 dörtlük yoksa üret, kaydet.
+   - Her basışta rastgele bir dörtlük göster.
+   - daily limit: 5, anahtarlar: poem_day_v2, poem_used_v2
+   - Şiirler özgün, klasik üslup kombinasyonlarıyla oluşturulur (telif riski yaratmamak için gerçek şair alıntısı değil).
+------------------------------------------------------------------- */
+
+const STORAGE_POEMS = "poems_klassik_v1";
+const STORAGE_DAY = "poem_day_v2";
+const STORAGE_USED = "poem_used_v2";
+const MAX_DAILY = 5;
+const POEM_COUNT = 200;
+
+/* satır havuzları - klasik üslup için zengin havuzlar */
+const S1 = [
+  "Geceler sensiz çöker, bir hüzün taşır göğü",
+  "Adın düşer dudaklarıma, bahar açar gönlümde",
+  "Gözlerinle başlar günüm, her ömür adınla dolar",
+  "Kalbim seninle atar, her vuruş bir dua olur",
+  "Bir tebessümün yeter, bütün kışlar güneş olur",
+  "Sana dair her söz, ruhuma bir şarkı olur",
+  "Sensiz geçen anlar, boş bir kervan gibi",
+  "Ellerin dokununca, zaman bile susar",
+  "Ruhum sana çekildi, yollar sana döner",
+  "Adını yazdım geceye, yıldızlar şahit oldu",
+  "Gönlümde açan güller, yalnız senin adınla",
+  "Sana bakınca dünya tekrar çiçek açar",
+  "Hasretin düşlerimde bir ateş gibi yanar",
+  "Gözlerinin denizinde kayboldum usul usul",
+  "Sevdan içimde büyür, yaz bitmez bir bahar gibi",
+  "Senle başlar her sabah, senle biter her gece",
+  "Yollar seni söyler bana, rüzgâr ismini taşır",
+  "Bir nazın yeter bana, ömür boyu meskenim",
+  "Dudakların dua olur, her gece dilimde",
+  "Senin adınla ısınır, en soğuk kalpler bile"
+];
+
+const S2 = [
+  "bir nazlı gamzenin gölgesinde",
+  "aynı gökyüzüne yazılı satırlarda",
+  "gönlümün en saklı köşesinde",
+  "her nefeste bir umutla",
+  "rüzgârın fısıldadığı sır gibi",
+  "ay ışığının düştüğü mendilde",
+  "gün doğarken düşlerimde",
+  "suskun gecelerin şarkısında",
+  "baharın ilk çiçeğinde",
+  "karanlıkta parlayan bir yıldız gibi",
+  "yıldızlarla süzülen bir melodi gibi",
+  "dudaklarından dökülen adınla",
+  "ellerimde ılık bir hatıra gibi",
+  "gizli bir sevdanın nakışı gibi",
+  "gözyaşlarımın en tatlı sebebi gibi",
+  "dillerde dolaşan eski bir masal gibi",
+  "rüyaların en nazlı köşesinde",
+  "zamanın unuttuğu o ilk anda",
+  "yüreğimde saklı bir çiçek misali",
+  "sonsuz bir düşün kıyısında"
+];
+
+const S3 = [
+  "gönlüm tekrar can bulur",
+  "bir şarkı söyler usul usul",
+  "her anım sana dönük olur",
+  "özlemim bir deniz kıyısıdır",
+  "bir umutla ısınır tenim",
+  "sensizliğe karşı bir kalkan olur",
+  "gözlerimde en güzel ışık sensin",
+  "ruhumda dinmeyen bir melodi çıkar",
+  "her solukta adın yankılanır",
+  "sevdam iz bırakır her köşede",
+  "kalbim seninle yeniden çarpar",
+  "her esen rüzgâr adını fısıldar",
+  "bir ömür seninle olur, yeter",
+  "suskunluğum sözlere döner sana",
+  "her gece adını sayarım mum gibi",
+  "dilimde hep o eski dua sen olursun",
+  "seninle tamamlanır her eksik yanım",
+  "gözlerim seni anar, zaman durur",
+  "seninle var olur en güzel baharım",
+  "sana adanmış bu ömür mutlak senin"
+];
+
+const S4 = [
+  "ve ben hep sana koşarım.",
+  "çünkü tek sevdiğim sensin.",
+  "sana olan aşkım sonsuzdur.",
+  "kalbim hep seninle atar.",
+  "sensiz bir dünya düşünemem artık.",
+  "adınla süslüdür her hayalim.",
+  "gönlümün en derin köşesinde saklısın.",
+  "ellerimi tut, zaman dursun.",
+  "bu sevda hep taze kalsın.",
+  "her adımda adını anarım.",
+  "sana dair ne varsa kutsal bana.",
+  "sen benim en güzel tesadüfümsün.",
+  "dudaklarımda adın, gönlümde sen.",
+  "birlikte geçecek tüm mevsimler bize.",
+  "seninle her yol ebedileşir.",
+  "sözler kifayetsiz, kalp anlatsın.",
+  "sensin yüreğimin en sıcak yanı.",
+  "her günümde senin izlerin var.",
+  "bir ömür yetmez seni sevmeye.",
+  "sana adanmış bir iki mısra değil tüm hayatım."
+];
+
+/* yardımcı: rastgele sayı */
+function r(arr){ return Math.floor(Math.random()*arr.length); }
+
+/* generate unique-ish quatrains; deterministic-ish but ok */
+function makePoems(count){
+  const set = new Set();
+  const poems = [];
+  let attempts = 0;
+  while(poems.length < count && attempts < count*10){
+    attempts++;
+    const a = S1[r(S1)];
+    const b = S2[r(S2)];
+    const c = S3[r(S3)];
+    const d = S4[r(S4)];
+    const text = `${a}\n${b}\n${c}\n${d}`;
+    if(!set.has(text)){
+      set.add(text);
+      // şair adını klasik tarzda varyasyonla üret (şeffaf: özgün şair adı değil)
+      const poet = pickPoetName(poems.length);
+      poems.push({text, poet});
+    }
+  }
+  // eksikse tekrar doldur
+  while(poems.length < count){
+    const a = S1[r(S1)];
+    const b = S2[r(S2)];
+    const c = S3[r(S3)];
+    const d = S4[r(S4)];
+    const text = `${a}\n${b}\n${c}\n${d}`;
+    const poet = pickPoetName(poems.length);
+    poems.push({text, poet});
+  }
+  return poems;
+}
+
+/* poet isimleri havuzu — klasik tını veren, ama NOT gerçek alıntı uyarısı var üstte */
+const POET_POOL = [
+  "Gizli Şair", "Söylenmemiş Mısra", "Klasik Türkmen", "Taşra Aşığı", "Divan Nidası",
+  "Yürek Şairi", "Aşık Derviş", "Gönül Bekçisi", "Sarı Leyla", "Hüsn-ü Aşk",
+  "Dördüncü Dize", "Eski Nefes", "Ruh Şairi", "Aşkı Söyleyen", "Mecnun'un Sesi",
+  "Gönül Nakışı", "Seyran Şairi", "Nazlı Dura", "Mâh-ı Aşk", "Hasret Ustası",
+  "Dervişân", "Şehrin Aşığı", "Günüm Şairi", "Gizli Bahar", "Kilim Şairi",
+  "Mısra Ustası", "Denizli Aşığı", "Vadî Şairi", "Nefes-i Sevda", "Eski Sözü"
+];
+
+function pickPoetName(i){
+  return POET_POOL[i % POET_POOL.length];
+}
+
+/* --- load or create poems into localStorage --- */
+function ensurePoems(){
+  try{
+    const raw = localStorage.getItem(STORAGE_POEMS);
+    if(raw){
+      const parsed = JSON.parse(raw);
+      if(Array.isArray(parsed) && parsed.length >= POEM_COUNT) return parsed;
+    }
+  }catch(e){}
+  // create and save
+  const newPoems = makePoems(POEM_COUNT);
+  try{ localStorage.setItem(STORAGE_POEMS, JSON.stringify(newPoems)); }catch(e){}
+  return newPoems;
+}
+
+/* --- daily usage management --- */
+function todayISO(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+function loadUsage(){
+  try{
+    const sd = localStorage.getItem(STORAGE_DAY);
+    let used = parseInt(localStorage.getItem(STORAGE_USED) || "0",10) || 0;
+    const td = todayISO();
+    if(sd !== td){
+      localStorage.setItem(STORAGE_DAY, td);
+      localStorage.setItem(STORAGE_USED, "0");
+      return 0;
+    }
+    return Math.min(used, MAX_DAILY);
+  }catch(e){ return 0; }
+}
+function saveUsage(used){
+  try{ localStorage.setItem(STORAGE_DAY, todayISO()); localStorage.setItem(STORAGE_USED, String(used)); }catch(e){}
+}
+
+/* --- UI ve buton davranışı --- */
+const poems = ensurePoems();
+let used = loadUsage();
+const btn = document.getElementById('btnShow');
+const remEl = document.getElementById('remaining');
+const poemBox = document.getElementById('poemBox');
+const poetEl = document.getElementById('poetName');
+
+function updateUI(){
+  const rem = Math.max(0, MAX_DAILY - used);
+  remEl.textContent = rem;
+  btn.disabled = rem <= 0;
+  if(rem <= 0){
+    poemBox.textContent = "Bugünlük hakkın doldu ❤️ Yarın tekrar gel!";
+    poetEl.textContent = "";
+  }
+}
+function showRandom(){
+  const idx = Math.floor(Math.random()*poems.length);
+  const p = poems[idx];
+  poemBox.textContent = p.text;
+  poetEl.textContent = "— " + p.poet;
+}
+
+btn.addEventListener('click', () => {
+  if(used >= MAX_DAILY){
+    updateUI();
+    alert("Bugünlük şiir hakkın bitti 💕 Yarın tekrar gel!");
+    return;
+  }
+  showRandom();
+  used++;
+  saveUsage(used);
+  updateUI();
+  if(used >= MAX_DAILY) alert("Bugünlük şiir hakkın bitti 💕");
+});
+
+/* ilk yükleme UI */
+updateUI();
+window.addEventListener('load', ()=>{
+  if((MAX_DAILY - used) > 0){
+    poemBox.textContent = "Hoşgeldin! Butona basınca klasik üslupta dörtlükler göreceksin. (" + (MAX_DAILY - used) + " hak kaldı)";
+  }
+});
+</script>
+</body>
+</html>
